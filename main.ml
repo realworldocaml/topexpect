@@ -390,7 +390,7 @@ let eval_phrases ~fname ~dry_run fcontents =
         | _ ->
           capture Chunk.Raw;
           out_phrase' ppf phr;
-          capture Chunk.Regexp;
+          capture Chunk.OCaml;
       in
       Oprint.out_phrase := out_phrase;
       begin match toplevel_exec_phrase ppf phrase with
@@ -452,18 +452,17 @@ let rec valid_phrases = function
   | [] -> true
   | (_, Phrase_part _) :: rest -> valid_phrases rest
   | (_, Phrase_code outcome) :: (_, Phrase_expect outcome') :: rest ->
-
     (
       let rec check a b =
-      (match a, b with
-      | (_, output) :: rest2, (Chunk.Regexp, expected_output) :: rest3 ->
-        let regexp = Str.regexp expected_output in
-        let correct = Str.string_match regexp output 0 in
-        correct && check rest2 rest3
-      | (_, a) :: rest2, (_, b) :: rest3 ->
-        a = b && check rest2 rest3
-      | [], [] -> true
-      | _, _ -> false)
+        (match a, b with
+        | (_, output) :: rest2, (Chunk.Regexp, expected_output) :: rest3 ->
+          let regexp = Str.regexp expected_output in
+          let correct = Str.string_match regexp output 0 in
+          correct && check rest2 rest3
+        | (_, a) :: rest2, (_, b) :: rest3 ->
+          a = b && check rest2 rest3
+        | [], [] -> true
+        | _, _ -> false)
        in
       let test = check outcome outcome' in
       test && valid_phrases rest)
