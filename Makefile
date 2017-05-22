@@ -1,4 +1,4 @@
-PKG=unix,compiler-libs.toplevel,ppx_sexp_conv
+PKG=unix,compiler-libs.toplevel,ppx_sexp_conv,str
 
 all:
 	ocamlfind c -o ocaml-topexpect -linkpkg -linkall -package $(PKG) main.ml

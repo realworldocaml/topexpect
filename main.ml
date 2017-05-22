@@ -28,7 +28,7 @@ let disable_outputs = lazy (
 
 
 module Chunk = struct
-  type kind = OCaml | Raw
+  type kind = OCaml | Raw | Regexp
     [@@deriving sexp]
 
   type response = (kind * string)
@@ -171,6 +171,8 @@ let payload_strings loc = function
     let aux = function
       | _, Some {Location.txt = Longident.Lident "ocaml"},
         Pconst_string (str, _) -> (Chunk.OCaml, str)
+      | _, Some {Location.txt = Longident.Lident "regexp"},
+        Pconst_string (str, _) -> (Chunk.Regexp, str)
       | _, None, Pconst_string (str, _) -> (Chunk.Raw, str)
       | loc, _, _ -> raise (Cannot_parse_payload loc)
     in
@@ -359,6 +361,8 @@ let cleanup_lines lines =
       join ((Chunk.Raw, str1 ^ "\n" ^ str2) :: rest)
     | (Chunk.OCaml, str1) :: (Chunk.OCaml, str2) :: rest ->
       join ((Chunk.OCaml, str1 ^ "\n" ^ str2) :: rest)
+    | (Chunk.Regexp, str1) :: (Chunk.Regexp, str2) :: rest ->
+      join ((Chunk.Regexp, str1 ^ "\n" ^ str2) :: rest)
     | x :: xs -> x :: join xs
     | [] -> []
   in
@@ -473,7 +477,20 @@ let rec valid_phrases = function
   | [] -> true
   | (_, Phrase_part _) :: rest -> valid_phrases rest
   | (_, Phrase_code outcome) :: (_, Phrase_expect outcome') :: rest ->
-    outcome = outcome' && valid_phrases rest
+    (
+      let rec check a b =
+        (match a, b with
+        | (_, output) :: rest2, (Chunk.Regexp, expected_output) :: rest3 ->
+          let regexp = Str.regexp expected_output in
+          let correct = Str.string_match regexp output 0 in
+          correct && check rest2 rest3
+        | (_, a) :: rest2, (_, b) :: rest3 ->
+          a = b && check rest2 rest3
+        | [], [] -> true
+        | _, _ -> false)
+       in
+      let test = check outcome outcome' in
+      test && valid_phrases rest)
   | (_, Phrase_code outcome) :: rest ->
     List.for_all (fun (_,s) -> is_whitespace s) outcome && valid_phrases rest
   | (_, Phrase_expect _) :: _ -> false
@@ -525,6 +542,7 @@ let output_phrases oc contents =
         let string_of_kind = function
           | Chunk.Raw -> ""
           | Chunk.OCaml -> "ocaml "
+          | Chunk.Regexp -> "regexp "
         in
         let output_expect oc = function
           | [] -> ()
@@ -586,6 +604,7 @@ let process_expect_file ~fname ~dry_run ~use_color ~in_place ~sexp_output =
   let oname = if in_place then fname else fname ^ ".corrected" in
   if success && not in_place && Sys.file_exists oname then
     Sys.remove oname;
+
   if not success then (
     let oc = open_out_bin (oname ^ ".tmp") in
     output_phrases oc file_contents phrases;
