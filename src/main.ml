@@ -85,15 +85,15 @@ let init_parser ~fname contents =
   Location.input_name := fname;
   (contents, lexbuf)
 
-let parse_phrase (contents, lexbuf) =
-  let open Lexing in
+let parse_phrase (_contents, lexbuf) =
   let startpos = lexbuf.Lexing.lex_curr_p in
   let parsed = match Parse.toplevel_phrase lexbuf with
     | phrase -> Ok phrase
     | exception exn ->
       let exn = match Location.error_of_exn exn with
+        | Some `Already_displayed
         | None -> raise exn
-        | Some error -> Location.Error (shift_location_error startpos error)
+        | Some (`Ok error) -> Location.Error (shift_location_error startpos error)
       in
       if lexbuf.Lexing.lex_last_action <> semisemi_action then begin
         let rec aux () = match Lexer.token lexbuf with
@@ -116,20 +116,22 @@ type 'a phrase_role =
 
 exception Cannot_parse_payload of Location.t
 
-let string_of_location {Location.loc_start = {pos_fname; pos_lnum; pos_bol; pos_cnum}} =
+let string_of_location
+    {Location.loc_start = {pos_fname; pos_lnum; pos_bol; pos_cnum}; _}
+  =
   Printf.sprintf "%s, line %d, col %d" pos_fname pos_lnum (pos_cnum - pos_bol)
 
 let payload_constants loc = function
   | PStr [{pstr_desc = Pstr_eval (expr, _); _}] ->
-    let one {pexp_loc; pexp_desc} = match pexp_desc with
-      | Pexp_apply ({pexp_desc = Pexp_ident ident},
-                    [Asttypes.Nolabel, {pexp_desc = Pexp_constant const}]) ->
+    let one {pexp_loc; pexp_desc; _} = match pexp_desc with
+      | Pexp_apply ({pexp_desc = Pexp_ident ident; _},
+                    [Asttypes.Nolabel, {pexp_desc = Pexp_constant const; _}]) ->
         (pexp_loc, Some ident, const)
       | Pexp_constant const -> (pexp_loc, None, const)
       | _ -> raise (Cannot_parse_payload pexp_loc)
     in
     let rec consts = function
-      | {pexp_desc=Pexp_sequence(e, rest)} -> one e :: consts rest
+      | {pexp_desc=Pexp_sequence(e, rest); _} -> one e :: consts rest
       | e -> [one e]
     in
     consts expr
@@ -140,7 +142,7 @@ let payload_strings loc = function
   | PStr [] -> []
   | x ->
     let aux = function
-      | _, Some {Location.txt = Longident.Lident "ocaml"},
+      | _, Some {Location.txt = Longident.Lident "ocaml"; _},
         Pconst_string (str, _) -> (Chunk.OCaml, str)
       | _, None, Pconst_string (str, _) -> (Chunk.Raw, str)
       | loc, _, _ -> raise (Cannot_parse_payload loc)
@@ -153,7 +155,7 @@ let string_payload x = constant_payload (Pconst_string (x, None))
 let attr_is x name = x.Asttypes.txt = name
 
 let phrase_role phrase = match phrase.parsed with
-  | Ok (Ptop_def [{pstr_desc = Pstr_extension((attr, payload), attrs); pstr_loc}])
+  | Ok (Ptop_def [{pstr_desc = Pstr_extension((attr, payload), _attrs); pstr_loc}])
     when List.exists (attr_is attr) ["expect"; "expect.nondeterministic"] ->
     begin match payload_strings pstr_loc payload with
       | responses ->
@@ -210,11 +212,11 @@ module Async_autorun = struct
     in
     (typ, runner, rewrite)
 
-  let rec normalize_type_path env path =
+  let normalize_type_path env path =
     match Env.find_type path env with
     | { Types.type_manifest = Some ty; _ } -> begin
         match Ctype.expand_head env ty with
-        | { Types.desc = Types.Tconstr (path, _, _) } -> path
+        | { Types.desc = Types.Tconstr (path, _, _); _ } -> path
         | _ -> path
       end
     | _ -> path
@@ -231,7 +233,7 @@ module Async_autorun = struct
   let rewrite_item env async_typ pstr_item tstr_item =
     match pstr_item.Parsetree.pstr_desc, tstr_item.Typedtree.str_desc with
     | (Parsetree.Pstr_eval (e, _),
-       Typedtree.Tstr_eval ({ Typedtree.exp_type = typ }, _)) ->
+       Typedtree.Tstr_eval ({ Typedtree.exp_type = typ; _ }, _)) ->
       begin match (Ctype.repr typ).Types.desc with
         | Types.Tconstr (path, _, _) when
             Path.same async_typ (normalize_type_path env path) ->
@@ -256,7 +258,7 @@ module Async_autorun = struct
         try
           let env = !Toploop.toplevel_env in
           let path = normalize_type_path env (Env.lookup_type async_typ env) in
-          let tstr, tsg, env =
+          let tstr, _tsg, env =
             Typemod.type_structure !Toploop.toplevel_env pstr Location.none in
           List.map2 (rewrite_item env path) pstr tstr.Typedtree.str_items
         with _ ->
@@ -422,7 +424,7 @@ let eval_phrases ~run_nondeterministic ~fname ~dry_run fcontents =
                   List.rev ((phrase, exec_code ~capture phrase) :: chunks)
                 | phrase' ->
                   let role = match phrase_role phrase' with
-                    | Phrase_expect { nondeterministic = true; responses }
+                    | Phrase_expect { nondeterministic = true; responses; _ }
                       when not run_nondeterministic -> Phrase_code responses
                     | _ -> exec_code ~capture phrase
                   in
@@ -616,7 +618,7 @@ let find_delim s =
       then Bytes.unsafe_to_string b
       else exhaust (next b)
     in
-    exhaust ""
+    exhaust (Bytes.of_string "")
 
 let output_phrases oc contents =
   let rec aux = function
@@ -675,14 +677,14 @@ let output_phrases oc contents =
           output_expect expect_code expect_post;
       );
       aux rest
-    | (phrase, Phrase_expect {location}) :: rest ->
+    | (phrase, Phrase_expect {location; _}) :: rest ->
       Printf.fprintf oc "%s" (phrase_contents contents phrase ~stop:location.loc_start.pos_cnum);
       aux rest
   in aux
 
 let document_of_phrases contents matched phrases =
   let rec parts_of_phrase part acc = function
-    | (_, Phrase_part { name }) :: rest ->
+    | (_, Phrase_part { name; _ }) :: rest ->
       Part.v ~name:part ~chunks:(List.rev acc) ::
       parts_of_phrase name [] rest
     | (_, Phrase_expect _) :: rest ->
@@ -700,7 +702,7 @@ let document_of_phrases contents matched phrases =
   let parts = parts_of_phrase "" [] phrases in
   Document.v ~matched ~parts
 
-let process_expect_file ~run_nondeterministic ~fname ~dry_run ~use_color ~in_place ~sexp_output =
+let process_expect_file ~run_nondeterministic ~fname ~dry_run ~in_place ~sexp_output =
   let file_contents =
     let ic = open_in fname in
     let len = in_channel_length ic in
@@ -741,7 +743,6 @@ let override_sys_argv args =
   Arg.current := 0;
 ;;
 
-let use_color   = ref true
 let in_place    = ref false
 let sexp_output = ref false
 let dry_run     = ref false
@@ -759,7 +760,7 @@ let process_file fname =
   let success =
     process_expect_file ~fname
       ~run_nondeterministic:!run_nondeterministic
-      ~dry_run:!dry_run ~use_color:!use_color
+      ~dry_run:!dry_run
       ~in_place:!in_place ~sexp_output:!sexp_output
   in
   exit (if success then 0 else 1)
@@ -838,7 +839,7 @@ module Options = Main_args.Make_bytetop_options (struct
     let _drawlambda = set dump_rawlambda
     let _dlambda = set dump_lambda
     let _dflambda = set dump_flambda
-    let _dtimings = set print_timings
+    let _dtimings () = profile_columns := [ `Time ]
     let _dinstr = set dump_instr
 
     let anonymous s = process_file s
