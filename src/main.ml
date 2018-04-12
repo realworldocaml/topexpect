@@ -6,7 +6,6 @@ module Linked = struct
 end
 
 open Parsetree
-open Sexplib.Conv
 open Ocaml_topexpect
 
 (* Standard outputs should be disable: multi threaded code could print
@@ -261,29 +260,20 @@ let eval_phrases ~run_nondeterministic ~dry_run lexbuf =
   )
 ;;
 
-let process_expect_file ~run_nondeterministic ~fname ~dry_run ~in_place ~sexp_output =
+let process_expect_file ~run_nondeterministic ~fname ~dry_run ~in_place =
   let lexbuf = Lexbuf.of_file fname in
   let phrases = eval_phrases ~run_nondeterministic ~dry_run lexbuf in
   let success, phrases = Phrase.validate ~run_nondeterministic phrases in
   let oname = if in_place then fname else fname ^ ".corrected" in
   if success && not in_place && Sys.file_exists oname then
     Sys.remove oname;
-  let phrases =
-    if success then phrases
-    else (
-      (* Otherwise, generate corrected file and keep toplevel output. *)
-      let oc = open_out_bin (oname ^ ".tmp") in
-      Phrase.output oc lexbuf phrases;
-      flush oc;
-      close_out oc;
-      Sys.rename (oname ^ ".tmp") oname;
-      phrases
-    )
-  in
-  if sexp_output then (
-    Phrase.document ~matched:success lexbuf phrases
-    |> Document.sexp_of_t
-    |> Sexplib.Sexp.output stdout_backup
+  if not success then (
+    (* In case of errors, generate corrected file and keep toplevel output. *)
+    let oc = open_out_bin (oname ^ ".tmp") in
+    Phrase.output oc lexbuf phrases;
+    flush oc;
+    close_out oc;
+    Sys.rename (oname ^ ".tmp") oname;
   )
 ;;
 
@@ -296,7 +286,6 @@ let override_sys_argv args =
 ;;
 
 let in_place    = ref false
-let sexp_output = ref false
 let dry_run     = ref false
 let run_nondeterministic = ref false
 
@@ -312,13 +301,12 @@ let process_file fname =
   process_expect_file ~fname
     ~run_nondeterministic:!run_nondeterministic
     ~dry_run:!dry_run
-    ~in_place:!in_place ~sexp_output:!sexp_output
+    ~in_place:!in_place
 ;;
 
 let args =
   Arg.align
     [ "-in-place", Arg.Set in_place,    " Overwrite file in place"
-    ; "-sexp"    , Arg.Set sexp_output, " Output the result as a s-expression instead of diffing"
     ; "-verbose" , Arg.Set verbose, " Include outcome of phrase evaluation (like ocaml toplevel)"
     ; "-dry-run" , Arg.Set dry_run, " Don't execute code, only return expected outcome"
     ; "-run-nondeterministic" , Arg.Set run_nondeterministic, " Run non-deterministic tests"
@@ -423,7 +411,7 @@ let main () =
     let replacement f x = f x
     let () = monkey_patch (module Env : T) field replacement
   end in
-  Topfind.don't_load_deeply ["unix"; "findlib.top"; "findlib.internal"; "compiler-libs.toplevel"; "ppx_sexp_conv"];
+  Topfind.don't_load_deeply ["unix"; "findlib.top"; "findlib.internal"; "compiler-libs.toplevel"];
 
   let usage =
     Printf.sprintf "Usage: %s [OPTIONS] FILE [ARGS]\n"
