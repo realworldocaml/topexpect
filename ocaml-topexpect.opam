@@ -15,7 +15,7 @@ build-test: [
 ]
 depends: [
   "jbuilder" {build}
-  "ppx_sexp_conv" {build}
+  "ppx_sexp_conv"
   "sexplib"
   "ocamlfind"
 ]
