@@ -284,8 +284,7 @@ let process_expect_file ~run_nondeterministic ~fname ~dry_run ~in_place ~sexp_ou
     Phrase.document ~matched:success lexbuf phrases
     |> Document.sexp_of_t
     |> Sexplib.Sexp.output stdout_backup
-  );
-  success
+  )
 ;;
 
 let override_sys_argv args =
@@ -310,13 +309,10 @@ let process_file fname =
   Compmisc.init_path true;
   Toploop.toplevel_env := Compmisc.initial_env ();
   Sys.interactive := false;
-  let success =
-    process_expect_file ~fname
-      ~run_nondeterministic:!run_nondeterministic
-      ~dry_run:!dry_run
-      ~in_place:!in_place ~sexp_output:!sexp_output
-  in
-  exit (if success then 0 else 1)
+  process_expect_file ~fname
+    ~run_nondeterministic:!run_nondeterministic
+    ~dry_run:!dry_run
+    ~in_place:!in_place ~sexp_output:!sexp_output
 ;;
 
 let args =
